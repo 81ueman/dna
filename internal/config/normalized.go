@@ -60,6 +60,12 @@ func LoadSnapshotDir(path string, topo topology.Topology) (Snapshot, error) {
 		snapshot.append(nodeSnapshot)
 	}
 
+	for _, node := range topo.Nodes {
+		if _, ok := seenNodes[node.ID]; !ok {
+			return Snapshot{}, fmt.Errorf("snapshot missing config for topology node %q", node.ID)
+		}
+	}
+
 	snapshot.sort()
 	return snapshot, nil
 }

@@ -138,6 +138,23 @@ interfaces:
 	}
 }
 
+func TestLoadSnapshotDirMissingTopologyNode(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "r1.yaml", `
+node: r1
+interfaces:
+  Ethernet1: {}
+`)
+
+	_, err := LoadSnapshotDir(dir, testTopology())
+	if err == nil {
+		t.Fatalf("LoadSnapshotDir succeeded, want missing node error")
+	}
+	if !strings.Contains(err.Error(), `missing config for topology node "r2"`) {
+		t.Fatalf("error = %q, want missing topology node", err)
+	}
+}
+
 func TestParseNodeConfigValidation(t *testing.T) {
 	tests := []struct {
 		name    string
