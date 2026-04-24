@@ -41,11 +41,7 @@ func LoadSnapshotDir(path string, topo topology.Topology) (Snapshot, error) {
 			return Snapshot{}, fmt.Errorf("read node config %q: %w", entry.Name(), err)
 		}
 
-		nodeSnapshot, err := ParseNodeConfig(data, topo)
-		if err != nil {
-			return Snapshot{}, fmt.Errorf("parse node config %q: %w", entry.Name(), err)
-		}
-		node, err := nodeSnapshot.singleNode()
+		node, nodeSnapshot, err := parseNodeConfig(data, topo)
 		if err != nil {
 			return Snapshot{}, fmt.Errorf("parse node config %q: %w", entry.Name(), err)
 		}
@@ -71,30 +67,35 @@ func LoadSnapshotDir(path string, topo topology.Topology) (Snapshot, error) {
 }
 
 func ParseNodeConfig(data []byte, topo topology.Topology) (Snapshot, error) {
+	_, snapshot, err := parseNodeConfig(data, topo)
+	return snapshot, err
+}
+
+func parseNodeConfig(data []byte, topo topology.Topology) (model.NodeID, Snapshot, error) {
 	var input nodeConfigYAML
 	if err := yaml.Unmarshal(data, &input); err != nil {
-		return Snapshot{}, fmt.Errorf("parse normalized config: %w", err)
+		return "", Snapshot{}, fmt.Errorf("parse normalized config: %w", err)
 	}
 	if input.Node == "" {
-		return Snapshot{}, fmt.Errorf("node is required")
+		return "", Snapshot{}, fmt.Errorf("node is required")
 	}
 
 	node := model.NodeID(input.Node)
 	validator := newValidator(topo)
 	if !validator.hasNode(node) {
-		return Snapshot{}, fmt.Errorf("node %q not found in topology", node)
+		return "", Snapshot{}, fmt.Errorf("node %q not found in topology", node)
 	}
 
 	var snapshot Snapshot
 	for ifaceName, iface := range input.Interfaces {
 		if ifaceName == "" {
-			return Snapshot{}, fmt.Errorf("interface name must not be empty")
+			return "", Snapshot{}, fmt.Errorf("interface name must not be empty")
 		}
 
 		interfaceID := model.InterfaceID(ifaceName)
 		vrf := defaultVRF(iface.VRF)
 		if !validator.hasInterface(node, interfaceID, vrf) {
-			return Snapshot{}, fmt.Errorf("interface %q in VRF %q on node %q not found in topology", interfaceID, vrf, node)
+			return "", Snapshot{}, fmt.Errorf("interface %q in VRF %q on node %q not found in topology", interfaceID, vrf, node)
 		}
 
 		up := true
@@ -110,7 +111,7 @@ func ParseNodeConfig(data []byte, topo topology.Topology) (Snapshot, error) {
 		for _, rawPrefix := range iface.Addresses {
 			prefix, err := parsePrefix(rawPrefix)
 			if err != nil {
-				return Snapshot{}, fmt.Errorf("interface %q address %q: %w", interfaceID, rawPrefix, err)
+				return "", Snapshot{}, fmt.Errorf("interface %q address %q: %w", interfaceID, rawPrefix, err)
 			}
 			snapshot.InterfaceAddresses = append(snapshot.InterfaceAddresses, model.InterfaceAddress{
 				Node:      node,
@@ -130,16 +131,16 @@ func ParseNodeConfig(data []byte, topo topology.Topology) (Snapshot, error) {
 	for i, route := range input.StaticRoutes {
 		vrf := defaultVRF(route.VRF)
 		if !validator.hasVRF(node, vrf) {
-			return Snapshot{}, fmt.Errorf("VRF %q on node %q not found in topology", vrf, node)
+			return "", Snapshot{}, fmt.Errorf("VRF %q on node %q not found in topology", vrf, node)
 		}
 		prefix, err := parsePrefix(route.Prefix)
 		if err != nil {
-			return Snapshot{}, fmt.Errorf("static route %d prefix %q: %w", i, route.Prefix, err)
+			return "", Snapshot{}, fmt.Errorf("static route %d prefix %q: %w", i, route.Prefix, err)
 		}
 
 		hasNextHop := route.NextHop != ""
 		if hasNextHop == route.Drop {
-			return Snapshot{}, fmt.Errorf("static route %d must specify exactly one of next_hop or drop", i)
+			return "", Snapshot{}, fmt.Errorf("static route %d must specify exactly one of next_hop or drop", i)
 		}
 
 		staticRoute := model.StaticRoute{
@@ -152,7 +153,7 @@ func ParseNodeConfig(data []byte, topo topology.Topology) (Snapshot, error) {
 		} else {
 			nextHop, err := netip.ParseAddr(route.NextHop)
 			if err != nil {
-				return Snapshot{}, fmt.Errorf("static route %d next_hop %q: %w", i, route.NextHop, err)
+				return "", Snapshot{}, fmt.Errorf("static route %d next_hop %q: %w", i, route.NextHop, err)
 			}
 			staticRoute.Action = model.StaticRouteActionNextHop
 			staticRoute.NextHop = nextHop
@@ -161,7 +162,7 @@ func ParseNodeConfig(data []byte, topo topology.Topology) (Snapshot, error) {
 	}
 
 	snapshot.sort()
-	return snapshot, nil
+	return node, snapshot, nil
 }
 
 type nodeConfigYAML struct {
@@ -208,26 +209,6 @@ func (s *Snapshot) append(other Snapshot) {
 	s.InterfaceStates = append(s.InterfaceStates, other.InterfaceStates...)
 	s.ConnectedRoutes = append(s.ConnectedRoutes, other.ConnectedRoutes...)
 	s.StaticRoutes = append(s.StaticRoutes, other.StaticRoutes...)
-}
-
-func (s Snapshot) singleNode() (model.NodeID, error) {
-	nodes := map[model.NodeID]bool{}
-	for _, fact := range s.InterfaceAddresses {
-		nodes[fact.Node] = true
-	}
-	for _, fact := range s.InterfaceStates {
-		nodes[fact.Node] = true
-	}
-	for _, fact := range s.ConnectedRoutes {
-		nodes[fact.Node] = true
-	}
-	for _, fact := range s.StaticRoutes {
-		nodes[fact.Node] = true
-	}
-	for node := range nodes {
-		return node, nil
-	}
-	return "", fmt.Errorf("node config produced no facts")
 }
 
 func (s *Snapshot) sort() {

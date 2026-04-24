@@ -116,6 +116,36 @@ not yaml
 	})
 }
 
+func TestLoadSnapshotDirAllowsEmptyNodeConfig(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "r1.yaml", `
+node: r1
+interfaces:
+  Ethernet1:
+    addresses:
+      - 10.0.12.1/30
+`)
+	writeFile(t, dir, "r2.yaml", `
+node: r2
+`)
+
+	snapshot, err := LoadSnapshotDir(dir, testTopology())
+	if err != nil {
+		t.Fatalf("load snapshot dir: %v", err)
+	}
+
+	assertEqual(t, snapshot.InterfaceAddresses, []model.InterfaceAddress{
+		{Node: "r1", Interface: "Ethernet1", VRF: model.DefaultVRF, Prefix: mustPrefix(t, "10.0.12.0/30")},
+	})
+	assertEqual(t, snapshot.InterfaceStates, []model.InterfaceState{
+		{Node: "r1", Interface: "Ethernet1", Up: true},
+	})
+	assertEqual(t, snapshot.ConnectedRoutes, []model.ConnectedRoute{
+		{Node: "r1", VRF: model.DefaultVRF, Prefix: mustPrefix(t, "10.0.12.0/30"), Interface: "Ethernet1"},
+	})
+	assertEqual(t, snapshot.StaticRoutes, nil)
+}
+
 func TestLoadSnapshotDirDuplicateNode(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "a.yaml", `
