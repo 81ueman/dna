@@ -1,0 +1,10 @@
+/dna
+/coverage.out
+/dist/
+/bin/
+*.test
+*.prof
+
+.DS_Store
+.idea/
+.vscode/
