@@ -69,6 +69,7 @@ func TestComparableFacts(t *testing.T) {
 		Node:    "r1",
 		VRF:     DefaultVRF,
 		Prefix:  mustPrefix(t, "10.0.0.0/24"),
+		Action:  StaticRouteActionNextHop,
 		NextHop: mustAddr(t, "192.0.2.1"),
 	}
 
@@ -138,9 +139,20 @@ func TestFactStrings(t *testing.T) {
 				Node:    "r1",
 				VRF:     DefaultVRF,
 				Prefix:  prefix,
+				Action:  StaticRouteActionNextHop,
 				NextHop: nextHop,
 			}.String(),
-			want: "StaticRoute{Node:r1 VRF:default Prefix:10.0.0.0/24 NextHop:192.0.2.1}",
+			want: "StaticRoute{Node:r1 VRF:default Prefix:10.0.0.0/24 Action:next-hop NextHop:192.0.2.1}",
+		},
+		{
+			name: "drop static route",
+			got: StaticRoute{
+				Node:   "r1",
+				VRF:    DefaultVRF,
+				Prefix: prefix,
+				Action: StaticRouteActionDrop,
+			}.String(),
+			want: "StaticRoute{Node:r1 VRF:default Prefix:10.0.0.0/24 Action:drop NextHop:invalid IP}",
 		},
 		{
 			name: "connected route",

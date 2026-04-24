@@ -98,18 +98,27 @@ type StaticRoute struct {
 	Node    NodeID
 	VRF     VRF
 	Prefix  netip.Prefix
+	Action  StaticRouteAction
 	NextHop netip.Addr
 }
 
 func (r StaticRoute) String() string {
 	return fmt.Sprintf(
-		"StaticRoute{Node:%s VRF:%s Prefix:%s NextHop:%s}",
+		"StaticRoute{Node:%s VRF:%s Prefix:%s Action:%s NextHop:%s}",
 		r.Node,
 		r.VRF,
 		r.Prefix,
+		r.Action,
 		r.NextHop,
 	)
 }
+
+type StaticRouteAction string
+
+const (
+	StaticRouteActionNextHop StaticRouteAction = "next-hop"
+	StaticRouteActionDrop    StaticRouteAction = "drop"
+)
 
 type ConnectedRoute struct {
 	Node      NodeID
