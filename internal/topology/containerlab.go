@@ -46,6 +46,10 @@ func ParseContainerlab(data []byte, opts LoadOptions) (Topology, error) {
 		}
 	}
 
+	if len(input.Topology.Nodes) == 0 {
+		return Topology{}, fmt.Errorf("topology.nodes must declare at least one node")
+	}
+
 	builder := newBuilder(normalize)
 	for nodeName := range input.Topology.Nodes {
 		if nodeName == "" {

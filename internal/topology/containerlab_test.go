@@ -104,6 +104,28 @@ func TestParseContainerlabValidation(t *testing.T) {
 		wantErr string
 	}{
 		{
+			name:    "empty file",
+			input:   "",
+			wantErr: "topology.nodes",
+		},
+		{
+			name: "missing nodes",
+			input: `
+topology:
+  links: []
+`,
+			wantErr: "topology.nodes",
+		},
+		{
+			name: "misspelled nodes",
+			input: `
+topology:
+  nodez:
+    r1: {}
+`,
+			wantErr: "topology.nodes",
+		},
+		{
 			name: "malformed endpoint",
 			input: `
 topology:
