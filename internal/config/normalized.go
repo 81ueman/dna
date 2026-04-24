@@ -80,10 +80,10 @@ func parseNodeConfig(data []byte, topo topology.Topology) (model.NodeID, Snapsho
 		return "", Snapshot{}, fmt.Errorf("node is required")
 	}
 
-	node := model.NodeID(input.Node)
 	validator := newValidator(topo)
-	if !validator.hasNode(node) {
-		return "", Snapshot{}, fmt.Errorf("node %q not found in topology", node)
+	node, ok := validator.resolveNode(input.Node)
+	if !ok {
+		return "", Snapshot{}, fmt.Errorf("node %q not found in topology", input.Node)
 	}
 
 	var snapshot Snapshot
@@ -264,25 +264,38 @@ func (s *Snapshot) sort() {
 }
 
 type validator struct {
-	nodes      map[model.NodeID]bool
-	interfaces map[interfaceKey]bool
-	vrfs       map[vrfKey]bool
+	nodes       map[model.NodeID]bool
+	configNames map[string]model.NodeID
+	interfaces  map[interfaceKey]bool
+	vrfs        map[vrfKey]bool
 }
 
 func newValidator(topo topology.Topology) validator {
 	v := validator{
-		nodes:      map[model.NodeID]bool{},
-		interfaces: map[interfaceKey]bool{},
-		vrfs:       map[vrfKey]bool{},
+		nodes:       map[model.NodeID]bool{},
+		configNames: map[string]model.NodeID{},
+		interfaces:  map[interfaceKey]bool{},
+		vrfs:        map[vrfKey]bool{},
 	}
 	for _, node := range topo.Nodes {
 		v.nodes[node.ID] = true
+		v.configNames[string(node.ID)] = node.ID
+	}
+	for node, configName := range topo.NodeConfigNames {
+		if configName != "" {
+			v.configNames[configName] = node
+		}
 	}
 	for _, iface := range topo.Interfaces {
 		v.interfaces[interfaceKey{node: iface.Node, iface: iface.ID, vrf: iface.VRF}] = true
 		v.vrfs[vrfKey{node: iface.Node, vrf: iface.VRF}] = true
 	}
 	return v
+}
+
+func (v validator) resolveNode(name string) (model.NodeID, bool) {
+	node, ok := v.configNames[name]
+	return node, ok
 }
 
 func (v validator) hasNode(node model.NodeID) bool {

@@ -146,6 +146,63 @@ node: r2
 	assertEqual(t, snapshot.StaticRoutes, nil)
 }
 
+func TestLoadSnapshotDirUsesNodeConfigNames(t *testing.T) {
+	dir := t.TempDir()
+	writeFile(t, dir, "leaf1.yaml", `
+node: leaf1
+interfaces:
+  Ethernet1:
+    addresses:
+      - 10.0.12.1/30
+`)
+	writeFile(t, dir, "leaf2.yaml", `
+node: leaf2
+`)
+
+	snapshot, err := LoadSnapshotDir(dir, topologyWithConfigNames())
+	if err != nil {
+		t.Fatalf("load snapshot dir: %v", err)
+	}
+
+	assertEqual(t, snapshot.InterfaceAddresses, []model.InterfaceAddress{
+		{Node: "r1", Interface: "Ethernet1", VRF: model.DefaultVRF, Prefix: mustPrefix(t, "10.0.12.0/30")},
+	})
+	assertEqual(t, snapshot.InterfaceStates, []model.InterfaceState{
+		{Node: "r1", Interface: "Ethernet1", Up: true},
+	})
+	assertEqual(t, snapshot.ConnectedRoutes, []model.ConnectedRoute{
+		{Node: "r1", VRF: model.DefaultVRF, Prefix: mustPrefix(t, "10.0.12.0/30"), Interface: "Ethernet1"},
+	})
+}
+
+func TestParseNodeConfigUsesNodeConfigName(t *testing.T) {
+	const input = `
+node: leaf1
+interfaces:
+  Ethernet1:
+    addresses:
+      - 10.0.12.1/30
+static_routes:
+  - prefix: 10.0.2.0/24
+    next_hop: 10.0.12.2
+`
+
+	snapshot, err := ParseNodeConfig([]byte(input), topologyWithConfigNames())
+	if err != nil {
+		t.Fatalf("parse node config: %v", err)
+	}
+
+	assertEqual(t, snapshot.StaticRoutes, []model.StaticRoute{
+		{
+			Node:    "r1",
+			VRF:     model.DefaultVRF,
+			Prefix:  mustPrefix(t, "10.0.2.0/24"),
+			Action:  model.StaticRouteActionNextHop,
+			NextHop: mustAddr(t, "10.0.12.2"),
+		},
+	})
+}
+
 func TestLoadSnapshotDirDuplicateNode(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "a.yaml", `
@@ -316,6 +373,15 @@ func testTopology() topology.Topology {
 			{Node: "r2", ID: "Ethernet1", VRF: model.DefaultVRF},
 		},
 	}
+}
+
+func topologyWithConfigNames() topology.Topology {
+	topo := testTopology()
+	topo.NodeConfigNames = map[model.NodeID]string{
+		"r1": "leaf1",
+		"r2": "leaf2",
+	}
+	return topo
 }
 
 func writeFile(t *testing.T, dir, name, content string) {
