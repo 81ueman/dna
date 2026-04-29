@@ -46,7 +46,6 @@ static_routes:
 	})
 	assertEqual(t, snapshot.ConnectedRoutes, []model.ConnectedRoute{
 		{Node: "r1", VRF: "blue", Prefix: mustPrefix(t, "10.0.2.0/24"), Interface: "Ethernet2"},
-		{Node: "r1", VRF: model.DefaultVRF, Prefix: mustPrefix(t, "10.0.12.0/30"), Interface: "Ethernet1"},
 	})
 	assertEqual(t, snapshot.StaticRoutes, []model.StaticRoute{
 		{

@@ -119,12 +119,14 @@ func parseNodeConfig(data []byte, topo topology.Topology) (model.NodeID, Snapsho
 				VRF:       vrf,
 				Prefix:    prefix,
 			})
-			snapshot.ConnectedRoutes = append(snapshot.ConnectedRoutes, model.ConnectedRoute{
-				Node:      node,
-				VRF:       vrf,
-				Prefix:    prefix,
-				Interface: interfaceID,
-			})
+			if up {
+				snapshot.ConnectedRoutes = append(snapshot.ConnectedRoutes, model.ConnectedRoute{
+					Node:      node,
+					VRF:       vrf,
+					Prefix:    prefix,
+					Interface: interfaceID,
+				})
+			}
 		}
 	}
 
