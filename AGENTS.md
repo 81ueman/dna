@@ -15,6 +15,9 @@ changes caused by network control-plane changes.
   implemented yet" when executed.
 - The paper PDF in the repository is reference material and should not be
   modified unless explicitly requested.
+- Before implementing or reviewing DNA behavior, read `docs/paper-notes.md`
+  for the project-specific summary of the paper, the source link, and the
+  current implementation scope.
 
 ## Planned Architecture
 
