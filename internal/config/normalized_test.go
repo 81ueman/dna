@@ -203,6 +203,110 @@ static_routes:
 	})
 }
 
+func TestParseNodeConfigAllowsDefaultVRFStaticRouteWithoutInterfaces(t *testing.T) {
+	const input = `
+node: r1
+static_routes:
+  - prefix: 203.0.113.0/24
+    drop: true
+`
+
+	topo := topology.Topology{
+		Nodes: []model.Node{
+			{ID: "r1"},
+		},
+	}
+
+	snapshot, err := ParseNodeConfig([]byte(input), topo)
+	if err != nil {
+		t.Fatalf("parse node config: %v", err)
+	}
+
+	assertEqual(t, snapshot.StaticRoutes, []model.StaticRoute{
+		{
+			Node:   "r1",
+			VRF:    model.DefaultVRF,
+			Prefix: mustPrefix(t, "203.0.113.0/24"),
+			Action: model.StaticRouteActionDrop,
+		},
+	})
+}
+
+func TestParseNodeConfigAllowsIdentityNodeConfigName(t *testing.T) {
+	topo := topology.Topology{
+		Nodes: []model.Node{
+			{ID: "r1"},
+		},
+		NodeConfigNames: map[model.NodeID]string{
+			"r1": "r1",
+		},
+	}
+
+	if _, err := ParseNodeConfig([]byte("node: r1\n"), topo); err != nil {
+		t.Fatalf("ParseNodeConfig returned error for identity node config name: %v", err)
+	}
+}
+
+func TestNodeConfigNameValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		topo    topology.Topology
+		wantErr string
+	}{
+		{
+			name: "duplicate alias",
+			topo: topology.Topology{
+				Nodes: []model.Node{
+					{ID: "r1"},
+					{ID: "r2"},
+				},
+				NodeConfigNames: map[model.NodeID]string{
+					"r1": "leaf",
+					"r2": "leaf",
+				},
+			},
+			wantErr: `node config name "leaf"`,
+		},
+		{
+			name: "alias collides with node id",
+			topo: topology.Topology{
+				Nodes: []model.Node{
+					{ID: "r1"},
+					{ID: "r2"},
+				},
+				NodeConfigNames: map[model.NodeID]string{
+					"r1": "r2",
+				},
+			},
+			wantErr: `node config name "r2"`,
+		},
+		{
+			name: "mapping references unknown node",
+			topo: topology.Topology{
+				Nodes: []model.Node{
+					{ID: "r1"},
+				},
+				NodeConfigNames: map[model.NodeID]string{
+					"r2": "leaf2",
+				},
+			},
+			wantErr: `unknown node "r2"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseNodeConfig([]byte("node: r1\n"), tt.topo)
+			if err == nil {
+				t.Fatalf("ParseNodeConfig succeeded, want error containing %q", tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error = %q, want substring %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestLoadSnapshotDirDuplicateNode(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "a.yaml", `
