@@ -286,6 +286,7 @@ func newValidator(topo topology.Topology) (validator, error) {
 	for _, node := range topo.Nodes {
 		v.nodes[node.ID] = true
 		v.configNames[string(node.ID)] = node.ID
+		v.vrfs[vrfKey{node: node.ID, vrf: model.DefaultVRF}] = true
 	}
 	for node, configName := range topo.NodeConfigNames {
 		if configName == "" {

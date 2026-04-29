@@ -203,6 +203,35 @@ static_routes:
 	})
 }
 
+func TestParseNodeConfigAllowsDefaultVRFStaticRouteWithoutInterfaces(t *testing.T) {
+	const input = `
+node: r1
+static_routes:
+  - prefix: 203.0.113.0/24
+    drop: true
+`
+
+	topo := topology.Topology{
+		Nodes: []model.Node{
+			{ID: "r1"},
+		},
+	}
+
+	snapshot, err := ParseNodeConfig([]byte(input), topo)
+	if err != nil {
+		t.Fatalf("parse node config: %v", err)
+	}
+
+	assertEqual(t, snapshot.StaticRoutes, []model.StaticRoute{
+		{
+			Node:   "r1",
+			VRF:    model.DefaultVRF,
+			Prefix: mustPrefix(t, "203.0.113.0/24"),
+			Action: model.StaticRouteActionDrop,
+		},
+	})
+}
+
 func TestNodeConfigNameValidation(t *testing.T) {
 	tests := []struct {
 		name    string
