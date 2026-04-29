@@ -203,6 +203,66 @@ static_routes:
 	})
 }
 
+func TestNodeConfigNameValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		topo    topology.Topology
+		wantErr string
+	}{
+		{
+			name: "duplicate alias",
+			topo: topology.Topology{
+				Nodes: []model.Node{
+					{ID: "r1"},
+					{ID: "r2"},
+				},
+				NodeConfigNames: map[model.NodeID]string{
+					"r1": "leaf",
+					"r2": "leaf",
+				},
+			},
+			wantErr: `node config name "leaf"`,
+		},
+		{
+			name: "alias collides with node id",
+			topo: topology.Topology{
+				Nodes: []model.Node{
+					{ID: "r1"},
+					{ID: "r2"},
+				},
+				NodeConfigNames: map[model.NodeID]string{
+					"r1": "r2",
+				},
+			},
+			wantErr: `node config name "r2"`,
+		},
+		{
+			name: "mapping references unknown node",
+			topo: topology.Topology{
+				Nodes: []model.Node{
+					{ID: "r1"},
+				},
+				NodeConfigNames: map[model.NodeID]string{
+					"r2": "leaf2",
+				},
+			},
+			wantErr: `unknown node "r2"`,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := ParseNodeConfig([]byte("node: r1\n"), tt.topo)
+			if err == nil {
+				t.Fatalf("ParseNodeConfig succeeded, want error containing %q", tt.wantErr)
+			}
+			if !strings.Contains(err.Error(), tt.wantErr) {
+				t.Fatalf("error = %q, want substring %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestLoadSnapshotDirDuplicateNode(t *testing.T) {
 	dir := t.TempDir()
 	writeFile(t, dir, "a.yaml", `
