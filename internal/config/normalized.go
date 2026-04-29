@@ -296,6 +296,9 @@ func newValidator(topo topology.Topology) (validator, error) {
 			return validator{}, fmt.Errorf("node config mapping references unknown node %q", node)
 		}
 		if existingNode, ok := v.configNames[configName]; ok {
+			if existingNode == node {
+				continue
+			}
 			return validator{}, fmt.Errorf("node config name %q for node %q collides with node %q", configName, node, existingNode)
 		}
 		v.configNames[configName] = node

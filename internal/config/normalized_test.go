@@ -232,6 +232,21 @@ static_routes:
 	})
 }
 
+func TestParseNodeConfigAllowsIdentityNodeConfigName(t *testing.T) {
+	topo := topology.Topology{
+		Nodes: []model.Node{
+			{ID: "r1"},
+		},
+		NodeConfigNames: map[model.NodeID]string{
+			"r1": "r1",
+		},
+	}
+
+	if _, err := ParseNodeConfig([]byte("node: r1\n"), topo); err != nil {
+		t.Fatalf("ParseNodeConfig returned error for identity node config name: %v", err)
+	}
+}
+
 func TestNodeConfigNameValidation(t *testing.T) {
 	tests := []struct {
 		name    string
