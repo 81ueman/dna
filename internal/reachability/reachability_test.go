@@ -149,6 +149,62 @@ func TestComputeLoopTerminates(t *testing.T) {
 	}
 }
 
+func TestComputeVisitsEachStateOnceAcrossECMPAndCycles(t *testing.T) {
+	topo := topology.Topology{
+		Nodes: []model.Node{{ID: "r1"}, {ID: "r2"}, {ID: "r3"}, {ID: "r4"}},
+		Interfaces: []model.Interface{
+			{Node: "r1", ID: "host", VRF: model.DefaultVRF},
+			{Node: "r1", ID: "r1-r2", VRF: model.DefaultVRF},
+			{Node: "r1", ID: "r1-r3", VRF: model.DefaultVRF},
+			{Node: "r2", ID: "r2-r1", VRF: model.DefaultVRF},
+			{Node: "r2", ID: "r2-r3", VRF: model.DefaultVRF},
+			{Node: "r2", ID: "r2-r4", VRF: model.DefaultVRF},
+			{Node: "r3", ID: "r3-r1", VRF: model.DefaultVRF},
+			{Node: "r3", ID: "r3-r2", VRF: model.DefaultVRF},
+			{Node: "r3", ID: "r3-r4", VRF: model.DefaultVRF},
+			{Node: "r4", ID: "r4-r2", VRF: model.DefaultVRF},
+			{Node: "r4", ID: "r4-r3", VRF: model.DefaultVRF},
+			{Node: "r4", ID: "host", VRF: model.DefaultVRF},
+		},
+		Links: []model.Link{
+			{NodeA: "r1", InterfaceA: "r1-r2", NodeB: "r2", InterfaceB: "r2-r1"},
+			{NodeA: "r2", InterfaceA: "r2-r1", NodeB: "r1", InterfaceB: "r1-r2"},
+			{NodeA: "r1", InterfaceA: "r1-r3", NodeB: "r3", InterfaceB: "r3-r1"},
+			{NodeA: "r3", InterfaceA: "r3-r1", NodeB: "r1", InterfaceB: "r1-r3"},
+			{NodeA: "r2", InterfaceA: "r2-r3", NodeB: "r3", InterfaceB: "r3-r2"},
+			{NodeA: "r3", InterfaceA: "r3-r2", NodeB: "r2", InterfaceB: "r2-r3"},
+			{NodeA: "r2", InterfaceA: "r2-r4", NodeB: "r4", InterfaceB: "r4-r2"},
+			{NodeA: "r4", InterfaceA: "r4-r2", NodeB: "r2", InterfaceB: "r2-r4"},
+			{NodeA: "r3", InterfaceA: "r3-r4", NodeB: "r4", InterfaceB: "r4-r3"},
+			{NodeA: "r4", InterfaceA: "r4-r3", NodeB: "r3", InterfaceB: "r3-r4"},
+		},
+		EdgePorts: []model.EdgePort{
+			{ID: "h1", Node: "r1", Interface: "host", VRF: model.DefaultVRF},
+			{ID: "h4", Node: "r4", Interface: "host", VRF: model.DefaultVRF},
+		},
+	}
+
+	reaches, err := Compute(
+		topo,
+		[]model.ForwardingRule{
+			ifaceRule("r1", model.DefaultVRF, "10.0.4.0/24", "r1-r2"),
+			ifaceRule("r1", model.DefaultVRF, "10.0.4.0/24", "r1-r3"),
+			ifaceRule("r2", model.DefaultVRF, "10.0.4.0/24", "r2-r3"),
+			ifaceRule("r2", model.DefaultVRF, "10.0.4.0/24", "r2-r4"),
+			ifaceRule("r3", model.DefaultVRF, "10.0.4.0/24", "r3-r2"),
+			ifaceRule("r3", model.DefaultVRF, "10.0.4.0/24", "r3-r4"),
+			ifaceRule("r4", model.DefaultVRF, "10.0.4.0/24", "host"),
+		},
+	)
+	if err != nil {
+		t.Fatalf("Compute returned error: %v", err)
+	}
+
+	assertEqual(t, reaches, []model.Reach{
+		{Source: "h1", Dest: "h4", VRF: model.DefaultVRF, Prefix: mustPrefix(t, "10.0.4.0/24")},
+	})
+}
+
 func TestComputeECMPReachesDestinationIfAnyPathWorks(t *testing.T) {
 	reaches, err := Compute(
 		twoRouterTopology(model.DefaultVRF),

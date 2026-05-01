@@ -175,7 +175,6 @@ func (i *graphIndex) traverse(
 		return
 	}
 	visited[key] = true
-	defer delete(visited, key)
 
 	for _, rule := range forwarding.Lookup(i.rules, node, ec.vrf, ec.prefix.Addr()) {
 		switch rule.Action {
