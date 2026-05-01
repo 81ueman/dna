@@ -44,7 +44,6 @@ type graphIndex struct {
 	edgePorts          []model.EdgePort
 	equivalenceClasses []equivalenceClass
 	rules              []model.ForwardingRule
-	interfaceRules     map[nodeVRF][]model.ForwardingRule
 }
 
 func newIndex(topo topology.Topology, rules []model.ForwardingRule) (*graphIndex, error) {
@@ -53,28 +52,31 @@ func newIndex(topo topology.Topology, rules []model.ForwardingRule) (*graphIndex
 		interfaces:         map[interfaceKey]bool{},
 		linksByInterface:   map[interfaceKey][]interfaceKey{},
 		edgePortsByIngress: map[edgeKey][]model.EdgePort{},
-		interfaceRules:     map[nodeVRF][]model.ForwardingRule{},
 	}
 
 	for _, node := range topo.Nodes {
 		index.nodes[node.ID] = true
 	}
 	for _, iface := range topo.Interfaces {
-		index.interfaces[interfaceKey{node: iface.Node, iface: iface.ID}] = true
+		index.interfaces[interfaceKey{node: iface.Node, iface: iface.ID, vrf: iface.VRF}] = true
 	}
 	for _, link := range topo.Links {
-		from := interfaceKey{node: link.NodeA, iface: link.InterfaceA}
-		to := interfaceKey{node: link.NodeB, iface: link.InterfaceB}
-		if err := index.validateInterface(from, "link"); err != nil {
+		fromNodeIface := nodeInterface{node: link.NodeA, iface: link.InterfaceA}
+		toNodeIface := nodeInterface{node: link.NodeB, iface: link.InterfaceB}
+		if err := index.validateLinkedInterface(fromNodeIface, "link"); err != nil {
 			return nil, err
 		}
-		if err := index.validateInterface(to, "link"); err != nil {
+		if err := index.validateLinkedInterface(toNodeIface, "link"); err != nil {
 			return nil, err
 		}
-		index.linksByInterface[from] = append(index.linksByInterface[from], to)
+		for _, vrf := range index.commonVRFs(fromNodeIface, toNodeIface) {
+			from := interfaceKey{node: link.NodeA, iface: link.InterfaceA, vrf: vrf}
+			to := interfaceKey{node: link.NodeB, iface: link.InterfaceB, vrf: vrf}
+			index.linksByInterface[from] = append(index.linksByInterface[from], to)
+		}
 	}
 	for _, edge := range topo.EdgePorts {
-		if err := index.validateInterface(interfaceKey{node: edge.Node, iface: edge.Interface}, "edge port"); err != nil {
+		if err := index.validateInterface(interfaceKey{node: edge.Node, iface: edge.Interface, vrf: edge.VRF}, "edge port"); err != nil {
 			return nil, err
 		}
 		index.edgePorts = append(index.edgePorts, edge)
@@ -89,8 +91,9 @@ func newIndex(topo topology.Topology, rules []model.ForwardingRule) (*graphIndex
 		sortInterfaces(index.linksByInterface[key])
 	}
 
-	ecSeen := map[equivalenceClass]bool{}
 	ruleSeen := map[model.ForwardingRule]bool{}
+	prefixesByVRF := map[model.VRF][]netip.Prefix{}
+	prefixSeen := map[equivalenceClass]bool{}
 	for _, rule := range rules {
 		if !index.nodes[rule.Node] {
 			return nil, fmt.Errorf("forwarding rule references unknown node %q", rule.Node)
@@ -101,23 +104,18 @@ func newIndex(topo topology.Topology, rules []model.ForwardingRule) (*graphIndex
 			ruleSeen[normalized] = true
 			index.rules = append(index.rules, normalized)
 		}
-		ec := equivalenceClass{vrf: normalized.VRF, prefix: normalized.Prefix}
-		if !ecSeen[ec] {
-			ecSeen[ec] = true
-			index.equivalenceClasses = append(index.equivalenceClasses, ec)
-		}
-		if normalized.Action == model.ForwardActionInterface {
-			index.interfaceRules[nodeVRF{node: normalized.Node, vrf: normalized.VRF}] = append(
-				index.interfaceRules[nodeVRF{node: normalized.Node, vrf: normalized.VRF}],
-				normalized,
-			)
+		prefixKey := equivalenceClass{vrf: normalized.VRF, prefix: normalized.Prefix}
+		if !prefixSeen[prefixKey] {
+			prefixSeen[prefixKey] = true
+			prefixesByVRF[normalized.VRF] = append(prefixesByVRF[normalized.VRF], normalized.Prefix)
 		}
 	}
 	sortRules(index.rules)
-	sortECs(index.equivalenceClasses)
-	for key := range index.interfaceRules {
-		sortRules(index.interfaceRules[key])
+	for vrf := range prefixesByVRF {
+		sortPrefixes(prefixesByVRF[vrf])
 	}
+	index.equivalenceClasses = buildEquivalenceClasses(prefixesByVRF)
+	sortECs(index.equivalenceClasses)
 
 	return index, nil
 }
@@ -127,9 +125,41 @@ func (i *graphIndex) validateInterface(key interfaceKey, context string) error {
 		return fmt.Errorf("%s references unknown node %q", context, key.node)
 	}
 	if !i.interfaces[key] {
-		return fmt.Errorf("%s references unknown interface %q on node %q", context, key.iface, key.node)
+		return fmt.Errorf("%s references unknown interface %q on node %q in VRF %q", context, key.iface, key.node, key.vrf)
 	}
 	return nil
+}
+
+func (i *graphIndex) validateLinkedInterface(key nodeInterface, context string) error {
+	if !i.nodes[key.node] {
+		return fmt.Errorf("%s references unknown node %q", context, key.node)
+	}
+	for iface := range i.interfaces {
+		if iface.node == key.node && iface.iface == key.iface {
+			return nil
+		}
+	}
+	return fmt.Errorf("%s references unknown interface %q on node %q", context, key.iface, key.node)
+}
+
+func (i *graphIndex) commonVRFs(a, b nodeInterface) []model.VRF {
+	aVRFs := map[model.VRF]bool{}
+	for iface := range i.interfaces {
+		if iface.node == a.node && iface.iface == a.iface {
+			aVRFs[iface.vrf] = true
+		}
+	}
+
+	var vrfs []model.VRF
+	for iface := range i.interfaces {
+		if iface.node == b.node && iface.iface == b.iface && aVRFs[iface.vrf] {
+			vrfs = append(vrfs, iface.vrf)
+		}
+	}
+	sort.Slice(vrfs, func(i, j int) bool {
+		return vrfs[i] < vrfs[j]
+	})
+	return vrfs
 }
 
 func (i *graphIndex) traverse(
@@ -154,18 +184,44 @@ func (i *graphIndex) traverse(
 		case model.ForwardActionInterface:
 			i.exitInterface(source, rule.Node, rule.Interface, ec, visited, seen, reaches)
 		case model.ForwardActionNextHop:
-			for _, ifaceRule := range i.resolveNextHop(rule) {
+			for _, ifaceRule := range i.resolveNextHop(rule.Node, rule.VRF, rule.NextHop, map[nextHopVisit]bool{}) {
 				i.exitInterface(source, ifaceRule.Node, ifaceRule.Interface, ec, visited, seen, reaches)
 			}
 		}
 	}
 }
 
-func (i *graphIndex) resolveNextHop(rule model.ForwardingRule) []model.ForwardingRule {
+func (i *graphIndex) resolveNextHop(
+	node model.NodeID,
+	vrf model.VRF,
+	nextHop netip.Addr,
+	visited map[nextHopVisit]bool,
+) []model.ForwardingRule {
+	key := nextHopVisit{node: node, vrf: vrf, nextHop: nextHop}
+	if visited[key] {
+		return nil
+	}
+	visited[key] = true
+	defer delete(visited, key)
+
+	seen := map[model.ForwardingRule]bool{}
 	var matches []model.ForwardingRule
-	for _, ifaceRule := range i.interfaceRules[nodeVRF{node: rule.Node, vrf: rule.VRF}] {
-		if ifaceRule.Prefix.Contains(rule.NextHop) {
-			matches = append(matches, ifaceRule)
+	for _, rule := range forwarding.Lookup(i.rules, node, vrf, nextHop) {
+		switch rule.Action {
+		case model.ForwardActionDrop:
+			continue
+		case model.ForwardActionInterface:
+			if !seen[rule] {
+				seen[rule] = true
+				matches = append(matches, rule)
+			}
+		case model.ForwardActionNextHop:
+			for _, ifaceRule := range i.resolveNextHop(rule.Node, rule.VRF, rule.NextHop, visited) {
+				if !seen[ifaceRule] {
+					seen[ifaceRule] = true
+					matches = append(matches, ifaceRule)
+				}
+			}
 		}
 	}
 	sortRules(matches)
@@ -181,6 +237,10 @@ func (i *graphIndex) exitInterface(
 	seen map[model.Reach]bool,
 	reaches *[]model.Reach,
 ) {
+	if !i.interfaces[interfaceKey{node: node, iface: iface, vrf: ec.vrf}] {
+		return
+	}
+
 	for _, dest := range i.edgePortsByIngress[edgeKey{node: node, iface: iface, vrf: ec.vrf}] {
 		if dest.ID == source.ID {
 			continue
@@ -197,14 +257,20 @@ func (i *graphIndex) exitInterface(
 		}
 	}
 
-	for _, neighbor := range i.linksByInterface[interfaceKey{node: node, iface: iface}] {
+	for _, neighbor := range i.linksByInterface[interfaceKey{node: node, iface: iface, vrf: ec.vrf}] {
 		i.traverse(source, neighbor.node, ec, visited, seen, reaches)
 	}
+}
+
+type nodeInterface struct {
+	node  model.NodeID
+	iface model.InterfaceID
 }
 
 type interfaceKey struct {
 	node  model.NodeID
 	iface model.InterfaceID
+	vrf   model.VRF
 }
 
 type edgeKey struct {
@@ -213,15 +279,109 @@ type edgeKey struct {
 	vrf   model.VRF
 }
 
-type nodeVRF struct {
-	node model.NodeID
-	vrf  model.VRF
+type nextHopVisit struct {
+	node    model.NodeID
+	vrf     model.VRF
+	nextHop netip.Addr
 }
 
 type visitKey struct {
 	node   model.NodeID
 	vrf    model.VRF
 	prefix netip.Prefix
+}
+
+func buildEquivalenceClasses(prefixesByVRF map[model.VRF][]netip.Prefix) []equivalenceClass {
+	seen := map[equivalenceClass]bool{}
+	var ecs []equivalenceClass
+	for vrf, prefixes := range prefixesByVRF {
+		for _, prefix := range prefixes {
+			fragments := []netip.Prefix{prefix}
+			for _, other := range prefixes {
+				if !strictlyContainsPrefix(prefix, other) {
+					continue
+				}
+				var next []netip.Prefix
+				for _, fragment := range fragments {
+					next = append(next, subtractPrefix(fragment, other)...)
+				}
+				fragments = next
+			}
+			for _, fragment := range fragments {
+				ec := equivalenceClass{vrf: vrf, prefix: fragment}
+				if !seen[ec] {
+					seen[ec] = true
+					ecs = append(ecs, ec)
+				}
+			}
+		}
+	}
+	return ecs
+}
+
+func subtractPrefix(parent, child netip.Prefix) []netip.Prefix {
+	parent = parent.Masked()
+	child = child.Masked()
+	if !strictlyContainsPrefix(parent, child) {
+		return []netip.Prefix{parent}
+	}
+
+	var fragments []netip.Prefix
+	var carve func(netip.Prefix)
+	carve = func(current netip.Prefix) {
+		current = current.Masked()
+		if current == child {
+			return
+		}
+		if !containsPrefix(current, child) {
+			fragments = append(fragments, current)
+			return
+		}
+
+		left, right := splitPrefix(current)
+		if containsPrefix(left, child) {
+			fragments = append(fragments, right)
+			carve(left)
+			return
+		}
+		fragments = append(fragments, left)
+		carve(right)
+	}
+	carve(parent)
+	sortPrefixes(fragments)
+	return fragments
+}
+
+func strictlyContainsPrefix(parent, child netip.Prefix) bool {
+	return containsPrefix(parent, child) && parent.Bits() < child.Bits()
+}
+
+func containsPrefix(parent, child netip.Prefix) bool {
+	parent = parent.Masked()
+	child = child.Masked()
+	return parent.Addr().Is4() == child.Addr().Is4() &&
+		parent.Bits() <= child.Bits() &&
+		parent.Contains(child.Addr())
+}
+
+func splitPrefix(prefix netip.Prefix) (netip.Prefix, netip.Prefix) {
+	prefix = prefix.Masked()
+	nextBits := prefix.Bits() + 1
+	left := netip.PrefixFrom(prefix.Addr(), nextBits).Masked()
+	right := netip.PrefixFrom(setAddrBit(prefix.Addr(), prefix.Bits()), nextBits).Masked()
+	return left, right
+}
+
+func setAddrBit(addr netip.Addr, bit int) netip.Addr {
+	if addr.Is4() {
+		bytes := addr.As4()
+		bytes[bit/8] |= 1 << (7 - bit%8)
+		return netip.AddrFrom4(bytes)
+	}
+
+	bytes := addr.As16()
+	bytes[bit/8] |= 1 << (7 - bit%8)
+	return netip.AddrFrom16(bytes)
 }
 
 func sortReaches(reaches []model.Reach) {
@@ -262,7 +422,10 @@ func sortInterfaces(interfaces []interfaceKey) {
 		if a.node != b.node {
 			return a.node < b.node
 		}
-		return a.iface < b.iface
+		if a.iface != b.iface {
+			return a.iface < b.iface
+		}
+		return a.vrf < b.vrf
 	})
 }
 
@@ -273,6 +436,12 @@ func sortECs(ecs []equivalenceClass) {
 			return a.vrf < b.vrf
 		}
 		return comparePrefix(a.prefix, b.prefix) < 0
+	})
+}
+
+func sortPrefixes(prefixes []netip.Prefix) {
+	sort.Slice(prefixes, func(i, j int) bool {
+		return comparePrefix(prefixes[i], prefixes[j]) < 0
 	})
 }
 

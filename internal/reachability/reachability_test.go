@@ -50,6 +50,69 @@ func TestComputeDropsUnreachablePrefixes(t *testing.T) {
 	}
 }
 
+func TestComputeSplitsOverlappingPrefixes(t *testing.T) {
+	reaches, err := Compute(
+		twoRouterTopology(model.DefaultVRF),
+		[]model.ForwardingRule{
+			ifaceRule("r1", model.DefaultVRF, "10.0.12.0/30", "r1-r2"),
+			ifaceRule("r2", model.DefaultVRF, "10.0.12.0/30", "r2-r1"),
+			ifaceRule("r2", model.DefaultVRF, "10.0.0.0/22", "host"),
+			nextHopRule("r1", model.DefaultVRF, "10.0.0.0/22", "10.0.12.2"),
+			{
+				Node:   "r1",
+				VRF:    model.DefaultVRF,
+				Prefix: mustPrefix(t, "10.0.2.0/24"),
+				Action: model.ForwardActionDrop,
+			},
+		},
+	)
+	if err != nil {
+		t.Fatalf("Compute returned error: %v", err)
+	}
+
+	assertEqual(t, reaches, []model.Reach{
+		{Source: "h1", Dest: "h2", VRF: model.DefaultVRF, Prefix: mustPrefix(t, "10.0.0.0/23")},
+		{Source: "h1", Dest: "h2", VRF: model.DefaultVRF, Prefix: mustPrefix(t, "10.0.3.0/24")},
+	})
+}
+
+func TestComputeResolvesRecursiveStaticNextHop(t *testing.T) {
+	reaches, err := Compute(
+		twoRouterTopology(model.DefaultVRF),
+		[]model.ForwardingRule{
+			ifaceRule("r1", model.DefaultVRF, "10.0.12.0/30", "r1-r2"),
+			ifaceRule("r2", model.DefaultVRF, "10.0.12.0/30", "r2-r1"),
+			ifaceRule("r2", model.DefaultVRF, "10.0.2.0/24", "host"),
+			nextHopRule("r1", model.DefaultVRF, "192.0.2.0/24", "10.0.12.2"),
+			nextHopRule("r1", model.DefaultVRF, "10.0.2.0/24", "192.0.2.2"),
+		},
+	)
+	if err != nil {
+		t.Fatalf("Compute returned error: %v", err)
+	}
+
+	assertEqual(t, reaches, []model.Reach{
+		{Source: "h1", Dest: "h2", VRF: model.DefaultVRF, Prefix: mustPrefix(t, "10.0.2.0/24")},
+	})
+}
+
+func TestComputeRecursiveNextHopLoopTerminates(t *testing.T) {
+	reaches, err := Compute(
+		twoRouterTopology(model.DefaultVRF),
+		[]model.ForwardingRule{
+			nextHopRule("r1", model.DefaultVRF, "10.0.2.0/24", "192.0.2.2"),
+			nextHopRule("r1", model.DefaultVRF, "192.0.2.0/24", "198.51.100.2"),
+			nextHopRule("r1", model.DefaultVRF, "198.51.100.0/24", "192.0.2.2"),
+		},
+	)
+	if err != nil {
+		t.Fatalf("Compute returned error: %v", err)
+	}
+	if len(reaches) != 0 {
+		t.Fatalf("reaches = %#v, want none", reaches)
+	}
+}
+
 func TestComputeLoopTerminates(t *testing.T) {
 	topo := topology.Topology{
 		Nodes: []model.Node{{ID: "r1"}, {ID: "r2"}},
@@ -116,6 +179,75 @@ func TestComputeHonorsVRFIsolation(t *testing.T) {
 			ifaceRule("r2", "blue", "10.0.2.0/24", "host"),
 			nextHopRule("r1", "blue", "10.0.2.0/24", "10.0.12.2"),
 			ifaceRule("r1", model.DefaultVRF, "10.0.99.0/24", "host"),
+		},
+	)
+	if err != nil {
+		t.Fatalf("Compute returned error: %v", err)
+	}
+
+	assertEqual(t, reaches, []model.Reach{
+		{Source: "h1", Dest: "h2", VRF: "blue", Prefix: mustPrefix(t, "10.0.2.0/24")},
+	})
+}
+
+func TestComputeDoesNotTraverseLinkAcrossDifferentInterfaceVRFs(t *testing.T) {
+	topo := topology.Topology{
+		Nodes: []model.Node{{ID: "r1"}, {ID: "r2"}},
+		Interfaces: []model.Interface{
+			{Node: "r1", ID: "r1-r2", VRF: "blue"},
+			{Node: "r1", ID: "host", VRF: "blue"},
+			{Node: "r2", ID: "r2-r1", VRF: model.DefaultVRF},
+			{Node: "r2", ID: "host", VRF: "blue"},
+		},
+		Links: []model.Link{
+			{NodeA: "r1", InterfaceA: "r1-r2", NodeB: "r2", InterfaceB: "r2-r1"},
+		},
+		EdgePorts: []model.EdgePort{
+			{ID: "h1", Node: "r1", Interface: "host", VRF: "blue"},
+			{ID: "h2", Node: "r2", Interface: "host", VRF: "blue"},
+		},
+	}
+
+	reaches, err := Compute(
+		topo,
+		[]model.ForwardingRule{
+			ifaceRule("r1", "blue", "10.0.2.0/24", "r1-r2"),
+			ifaceRule("r2", "blue", "10.0.2.0/24", "host"),
+		},
+	)
+	if err != nil {
+		t.Fatalf("Compute returned error: %v", err)
+	}
+	if len(reaches) != 0 {
+		t.Fatalf("reaches = %#v, want none", reaches)
+	}
+}
+
+func TestComputeTraversesLinkOnlyWithinMatchingInterfaceVRF(t *testing.T) {
+	topo := topology.Topology{
+		Nodes: []model.Node{{ID: "r1"}, {ID: "r2"}},
+		Interfaces: []model.Interface{
+			{Node: "r1", ID: "r1-r2", VRF: model.DefaultVRF},
+			{Node: "r1", ID: "r1-r2", VRF: "blue"},
+			{Node: "r1", ID: "host", VRF: "blue"},
+			{Node: "r2", ID: "r2-r1", VRF: model.DefaultVRF},
+			{Node: "r2", ID: "r2-r1", VRF: "blue"},
+			{Node: "r2", ID: "host", VRF: "blue"},
+		},
+		Links: []model.Link{
+			{NodeA: "r1", InterfaceA: "r1-r2", NodeB: "r2", InterfaceB: "r2-r1"},
+		},
+		EdgePorts: []model.EdgePort{
+			{ID: "h1", Node: "r1", Interface: "host", VRF: "blue"},
+			{ID: "h2", Node: "r2", Interface: "host", VRF: "blue"},
+		},
+	}
+
+	reaches, err := Compute(
+		topo,
+		[]model.ForwardingRule{
+			ifaceRule("r1", "blue", "10.0.2.0/24", "r1-r2"),
+			ifaceRule("r2", "blue", "10.0.2.0/24", "host"),
 		},
 	)
 	if err != nil {
