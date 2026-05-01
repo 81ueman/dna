@@ -8,3 +8,8 @@
 .DS_Store
 .idea/
 .vscode/
+.pytest_cache/
+.venv/
+tools/batfish-exporter/.venv/
+__pycache__/
+*.pyc

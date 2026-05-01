@@ -1,0 +1,23 @@
+[project]
+name = "dna-batfish-exporter"
+version = "0.1.0"
+description = "Export Batfish-normalized vendor configuration facts for dna."
+requires-python = ">=3.11"
+dependencies = [
+    "pybatfish>=2025.7.7.2423",
+]
+
+[project.scripts]
+batfish-export = "batfish_exporter.cli:main"
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0.0",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/batfish_exporter"]
