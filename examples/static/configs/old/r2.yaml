@@ -1,0 +1,8 @@
+node: r2
+interfaces:
+  eth1:
+    addresses:
+      - 10.0.12.2/30
+  eth2:
+    addresses:
+      - 10.0.2.1/24
