@@ -82,3 +82,44 @@ make lint
 make fmt
 make run
 ```
+
+## Batfish Parser Adapter
+
+Batfish is used only as a vendor configuration parser/normalizer. The Go
+forwarding, diff, and reachability code consume exported DNA facts and do not
+call Batfish during recomputation.
+
+The Python exporter is managed with `uv` under `tools/batfish-exporter`:
+
+```sh
+uv run --project tools/batfish-exporter batfish-export \
+  --snapshot path/to/vendor/configs \
+  --output /tmp/dna-batfish.json
+```
+
+If `path/to/vendor/configs` is not already a Batfish snapshot root containing a
+`configs/` directory, the exporter stages it into that layout before uploading
+it to Batfish.
+
+Batfish itself must be running separately:
+
+```sh
+docker run --name batfish \
+  -v batfish-data:/data \
+  -p 8888:8888 \
+  -p 9996:9996 \
+  -p 9997:9997 \
+  batfish/allinone
+```
+
+Run the exporter tests with:
+
+```sh
+uv run --project tools/batfish-exporter pytest
+```
+
+Run the Batfish integration test, with the Docker service running, using:
+
+```sh
+DNA_BATFISH_INTEGRATION=1 go test ./internal/config
+```

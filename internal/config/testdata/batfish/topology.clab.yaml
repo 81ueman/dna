@@ -1,0 +1,15 @@
+name: batfish-fixtures
+topology:
+  nodes:
+    cisco1: {}
+    arista1: {}
+  links:
+    - endpoints: ["cisco1:GigabitEthernet0/0", "arista1:Ethernet1"]
+x-dna:
+  edge_ports:
+    - name: cisco-host
+      node: cisco1
+      interface: GigabitEthernet0/1
+    - name: arista-host
+      node: arista1
+      interface: Ethernet2
