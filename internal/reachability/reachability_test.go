@@ -227,6 +227,7 @@ func TestComputeECMPReachesDestinationIfAnyPathWorks(t *testing.T) {
 
 func TestComputeHonorsVRFIsolation(t *testing.T) {
 	topo := twoRouterTopology("blue")
+	topo.Interfaces = append(topo.Interfaces, model.Interface{Node: "r1", ID: "host", VRF: model.DefaultVRF})
 	reaches, err := Compute(
 		topo,
 		[]model.ForwardingRule{
@@ -362,6 +363,36 @@ func TestComputeRejectsInvalidTopologyReferences(t *testing.T) {
 	)
 	if err == nil {
 		t.Fatalf("Compute succeeded, want invalid topology error")
+	}
+}
+
+func TestComputeRejectsInterfaceRuleWithUnknownInterface(t *testing.T) {
+	_, err := Compute(
+		topology.Topology{
+			Nodes:      []model.Node{{ID: "r1"}},
+			Interfaces: []model.Interface{{Node: "r1", ID: "eth1", VRF: model.DefaultVRF}},
+		},
+		[]model.ForwardingRule{
+			ifaceRule("r1", model.DefaultVRF, "10.0.2.0/24", "eth2"),
+		},
+	)
+	if err == nil {
+		t.Fatalf("Compute succeeded, want unknown interface rule error")
+	}
+}
+
+func TestComputeRejectsInterfaceRuleWithWrongVRF(t *testing.T) {
+	_, err := Compute(
+		topology.Topology{
+			Nodes:      []model.Node{{ID: "r1"}},
+			Interfaces: []model.Interface{{Node: "r1", ID: "eth1", VRF: model.DefaultVRF}},
+		},
+		[]model.ForwardingRule{
+			ifaceRule("r1", "blue", "10.0.2.0/24", "eth1"),
+		},
+	)
+	if err == nil {
+		t.Fatalf("Compute succeeded, want wrong VRF interface rule error")
 	}
 }
 

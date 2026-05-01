@@ -100,6 +100,14 @@ func newIndex(topo topology.Topology, rules []model.ForwardingRule) (*graphIndex
 		}
 		normalized := rule
 		normalized.Prefix = rule.Prefix.Masked()
+		if normalized.Action == model.ForwardActionInterface {
+			if err := index.validateInterface(
+				interfaceKey{node: normalized.Node, iface: normalized.Interface, vrf: normalized.VRF},
+				"forwarding rule",
+			); err != nil {
+				return nil, err
+			}
+		}
 		if !ruleSeen[normalized] {
 			ruleSeen[normalized] = true
 			index.rules = append(index.rules, normalized)
