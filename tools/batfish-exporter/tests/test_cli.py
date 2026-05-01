@@ -1,6 +1,33 @@
 import pytest
 
-from batfish_exporter.cli import ExportError, export_snapshot, parse_interface_ref, staged_snapshot
+from batfish_exporter.cli import (
+    ExportError,
+    export_snapshot,
+    export_static_routes,
+    parse_interface_ref,
+    staged_snapshot,
+)
+
+
+class FakeQuestion:
+    def __init__(self, answer):
+        self._answer = answer
+
+    def answer(self):
+        return self._answer
+
+
+class FakeQuestions:
+    def __init__(self, answer):
+        self._answer = answer
+
+    def viModel(self):
+        return FakeQuestion(self._answer)
+
+
+class FakeBatfish:
+    def __init__(self, answer):
+        self.q = FakeQuestions(answer)
 
 
 def test_parse_interface_ref():
@@ -15,6 +42,96 @@ def test_parse_interface_ref_rejects_unexpected_format():
 def test_export_snapshot_rejects_missing_snapshot_path(tmp_path):
     with pytest.raises(ExportError, match="snapshot path does not exist"):
         export_snapshot(tmp_path / "missing", host="localhost", network="dna", snapshot_name="snapshot")
+
+
+def test_export_static_routes_uses_configured_vi_model_routes():
+    routes = export_static_routes(
+        FakeBatfish(
+            {
+                "answerElements": [
+                    {
+                        "nodes": {
+                            "r1": {
+                                "vrfs": {
+                                    "default": {
+                                        "staticRoutes": [
+                                            {
+                                                "network": "10.0.2.0/24",
+                                                "nextHopInterface": "dynamic",
+                                                "nextHopIp": "10.0.12.2",
+                                            },
+                                            {
+                                                "network": "203.0.113.0/24",
+                                                "nextHopInterface": "null_interface",
+                                                "nextHopIp": "AUTO/NONE(-1l)",
+                                            },
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    }
+                ]
+            }
+        )
+    )
+
+    assert routes == [
+        {
+            "node": "r1",
+            "vrf": "default",
+            "prefix": "10.0.2.0/24",
+            "next_hop": "10.0.12.2",
+        },
+        {
+            "node": "r1",
+            "vrf": "default",
+            "prefix": "203.0.113.0/24",
+            "drop": True,
+        },
+    ]
+
+
+def test_export_static_routes_preserves_unsupported_interface_next_hop():
+    routes = export_static_routes(
+        FakeBatfish(
+            {
+                "answerElements": [
+                    {
+                        "nodes": {
+                            "r1": {
+                                "vrfs": {
+                                    "default": {
+                                        "staticRoutes": [
+                                            {
+                                                "network": "10.0.2.0/24",
+                                                "nextHopInterface": "Ethernet1",
+                                                "nextHopIp": "AUTO/NONE(-1l)",
+                                            }
+                                        ]
+                                    }
+                                }
+                            }
+                        }
+                    }
+                ]
+            }
+        )
+    )
+
+    assert routes == [
+        {
+            "node": "r1",
+            "vrf": "default",
+            "prefix": "10.0.2.0/24",
+            "next_hop_interface": "Ethernet1",
+        }
+    ]
+
+
+def test_export_static_routes_reports_unexpected_vi_model_shape():
+    with pytest.raises(ExportError, match="viModel answer"):
+        export_static_routes(FakeBatfish({"answerElements": []}))
 
 
 def test_staged_snapshot_wraps_config_directory(tmp_path):

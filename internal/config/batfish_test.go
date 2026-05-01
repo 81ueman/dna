@@ -88,6 +88,73 @@ func TestParseBatfishExport(t *testing.T) {
 	})
 }
 
+func TestParseBatfishExportSkipsInterfacesOutsideTopology(t *testing.T) {
+	const input = `{
+  "nodes": ["r1", "r2"],
+  "interfaces": [
+    {"node": "r1", "interface": "Management1", "vrf": "default", "addresses": ["192.0.2.1/24"], "up": true},
+    {"node": "r1", "interface": "Loopback0", "vrf": "default", "addresses": ["not-a-prefix"], "up": true},
+    {"node": "r1", "interface": "Ethernet1", "vrf": "default", "addresses": ["10.0.12.1/30"], "up": true},
+    {"node": "r2", "interface": "Ethernet1", "vrf": "default", "addresses": ["10.0.12.2/30"], "up": true}
+  ],
+  "static_routes": []
+}`
+
+	snapshot, err := ParseBatfishExport([]byte(input), testTopology())
+	if err != nil {
+		t.Fatalf("parse batfish export: %v", err)
+	}
+
+	assertEqual(t, snapshot.InterfaceAddresses, []model.InterfaceAddress{
+		{Node: "r1", Interface: "Ethernet1", VRF: model.DefaultVRF, Prefix: mustPrefix(t, "10.0.12.0/30")},
+		{Node: "r2", Interface: "Ethernet1", VRF: model.DefaultVRF, Prefix: mustPrefix(t, "10.0.12.0/30")},
+	})
+	assertEqual(t, snapshot.InterfaceStates, []model.InterfaceState{
+		{Node: "r1", Interface: "Ethernet1", Up: true},
+		{Node: "r2", Interface: "Ethernet1", Up: true},
+	})
+	assertEqual(t, snapshot.ConnectedRoutes, []model.ConnectedRoute{
+		{Node: "r1", VRF: model.DefaultVRF, Prefix: mustPrefix(t, "10.0.12.0/30"), Interface: "Ethernet1"},
+		{Node: "r2", VRF: model.DefaultVRF, Prefix: mustPrefix(t, "10.0.12.0/30"), Interface: "Ethernet1"},
+	})
+}
+
+func TestParseBatfishExportSkipsStaticRoutesOutsideTopologyVRFs(t *testing.T) {
+	const input = `{
+  "nodes": ["r1", "r2"],
+  "interfaces": [],
+  "static_routes": [
+    {
+      "node": "r1",
+      "vrf": "management",
+      "prefix": "not-a-prefix",
+      "next_hop_interface": "Management1"
+    },
+    {
+      "node": "r1",
+      "vrf": "default",
+      "prefix": "10.0.2.0/24",
+      "next_hop": "10.0.12.2"
+    }
+  ]
+}`
+
+	snapshot, err := ParseBatfishExport([]byte(input), testTopology())
+	if err != nil {
+		t.Fatalf("parse batfish export: %v", err)
+	}
+
+	assertEqual(t, snapshot.StaticRoutes, []model.StaticRoute{
+		{
+			Node:    "r1",
+			VRF:     model.DefaultVRF,
+			Prefix:  mustPrefix(t, "10.0.2.0/24"),
+			Action:  model.StaticRouteActionNextHop,
+			NextHop: mustAddr(t, "10.0.12.2"),
+		},
+	})
+}
+
 func TestParseBatfishExportValidation(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -106,18 +173,7 @@ func TestParseBatfishExportValidation(t *testing.T) {
 			wantErr: `missing config for topology node "r2"`,
 		},
 		{
-			name: "unknown interface",
-			input: `{
-  "nodes": ["r1", "r2"],
-  "interfaces": [
-    {"node": "r1", "interface": "Ethernet99", "vrf": "default", "addresses": [], "up": true}
-  ],
-  "static_routes": []
-}`,
-			wantErr: `interface "Ethernet99"`,
-		},
-		{
-			name: "invalid address",
+			name: "invalid address on topology interface",
 			input: `{
   "nodes": ["r1", "r2"],
   "interfaces": [

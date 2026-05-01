@@ -112,26 +112,32 @@ def export_interfaces(bf: Any) -> list[dict[str, Any]]:
 
 
 def export_static_routes(bf: Any) -> list[dict[str, Any]]:
-    frame = bf.q.routes(protocols="static").answer().frame()
+    answer = bf.q.viModel().answer()
+    try:
+        nodes = answer["answerElements"][0]["nodes"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise ExportError("Batfish viModel answer does not contain node configurations") from exc
+
     routes: list[dict[str, Any]] = []
-    for row in question_rows(frame):
-        route = {
-            "node": str(row.get("Node")),
-            "vrf": default_vrf(row.get("VRF")),
-            "prefix": str(row.get("Network")),
-        }
-        next_hop_ip = string_or_empty(row.get("Next_Hop_IP"))
-        next_hop_interface = string_or_empty(row.get("Next_Hop_Interface"))
-        next_hop = string_or_empty(row.get("Next_Hop")).lower()
+    for node, config in nodes.items():
+        for vrf, vrf_config in config.get("vrfs", {}).items():
+            for static_route in vrf_config.get("staticRoutes", []):
+                route = {
+                    "node": str(node),
+                    "vrf": default_vrf(vrf),
+                    "prefix": str(static_route.get("network")),
+                }
+                next_hop_ip = string_or_empty(static_route.get("nextHopIp"))
+                next_hop_interface = string_or_empty(static_route.get("nextHopInterface"))
 
-        if next_hop in {"discard", "drop"} or next_hop_interface == "null_interface":
-            route["drop"] = True
-        elif next_hop_ip:
-            route["next_hop"] = next_hop_ip
-        elif next_hop_interface:
-            route["next_hop_interface"] = next_hop_interface
+                if next_hop_interface == "null_interface":
+                    route["drop"] = True
+                elif next_hop_ip and not is_auto_none(next_hop_ip):
+                    route["next_hop"] = next_hop_ip
+                elif next_hop_interface:
+                    route["next_hop_interface"] = next_hop_interface
 
-        routes.append(route)
+                routes.append(route)
     return sorted(
         routes,
         key=lambda item: (
@@ -208,6 +214,10 @@ def string_or_empty(value: Any) -> str:
     if raw in {"None", "nan", "<NA>"}:
         return ""
     return raw
+
+
+def is_auto_none(value: str) -> bool:
+    return value.startswith("AUTO/NONE")
 
 
 def bool_value(value: Any) -> bool:

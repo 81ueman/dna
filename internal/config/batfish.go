@@ -131,7 +131,7 @@ func ParseBatfishExport(data []byte, topo topology.Topology) (Snapshot, error) {
 		interfaceID := model.InterfaceID(iface.Interface)
 		vrf := defaultVRF(iface.VRF)
 		if !validator.hasInterface(node, interfaceID, vrf) {
-			return Snapshot{}, fmt.Errorf("interface %q in VRF %q on node %q not found in topology", interfaceID, vrf, node)
+			continue
 		}
 
 		state := model.InterfaceState{Node: node, Interface: interfaceID, Up: iface.Up}
@@ -169,7 +169,7 @@ func ParseBatfishExport(data []byte, topo topology.Topology) (Snapshot, error) {
 		seenNodes[node] = true
 		vrf := defaultVRF(route.VRF)
 		if !validator.hasVRF(node, vrf) {
-			return Snapshot{}, fmt.Errorf("VRF %q on node %q not found in topology", vrf, node)
+			continue
 		}
 		prefix, err := parsePrefix(route.Prefix)
 		if err != nil {
